@@ -2,6 +2,7 @@ package tus
 
 import (
 	"bytes"
+	"fmt"
 )
 
 type Uploader struct {
@@ -41,11 +42,15 @@ func (u *Uploader) Offset() int64 {
 }
 
 // Upload uploads the entire body to the server.
-func (u *Uploader) Upload() error {
+func (u *Uploader) Upload(query string) error {
+	fmt.Println("uploading")
+	fmt.Println("processing for ", " offset: ", u.offset, "upload ", u.upload, " size: ", u.upload.size, " aborted ", u.aborted)
 	for u.offset < u.upload.size && !u.aborted {
-		err := u.UploadChunck()
+		fmt.Println("looping")
+		err := u.UploadChunck(query)
 
 		if err != nil {
+			fmt.Println("uploading failed with ", err)
 			return err
 		}
 	}
@@ -54,31 +59,32 @@ func (u *Uploader) Upload() error {
 }
 
 // UploadChunck uploads a single chunck.
-func (u *Uploader) UploadChunck() error {
+func (u *Uploader) UploadChunck(query string) error {
+	if query == "" {
+		query = "?"
+	}
 	data := make([]byte, u.client.Config.ChunkSize)
 
 	_, err := u.upload.stream.Seek(u.offset, 0)
-
 	if err != nil {
+		fmt.Println("error seeking ", err)
 		return err
 	}
 
 	size, err := u.upload.stream.Read(data)
-
 	if err != nil {
+		fmt.Println("error size ", size)
 		return err
 	}
 
 	body := bytes.NewBuffer(data[:size])
-
-	newOffset, err := u.client.uploadChunck(u.url, body, int64(size), u.offset)
-
+	newOffset, err := u.client.uploadChunck(u.url+query, body, int64(size), u.offset)
 	if err != nil {
 		return err
 	}
 
 	u.offset = newOffset
-
+	fmt.Println("offset ", u.offset)
 	u.upload.updateProgress(u.offset)
 
 	u.notifyChan <- true

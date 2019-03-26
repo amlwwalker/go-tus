@@ -2,6 +2,7 @@ package tus
 
 import (
 	"net/http"
+	"time"
 )
 
 // Config provides a way to configure the Client depending on your needs.
@@ -20,6 +21,7 @@ type Config struct {
 	// Set custom Transport settings.
 	// Use this if you are behind a proxy.
 	Transport http.RoundTripper
+	Timeout   time.Duration
 }
 
 // DefaultConfig return the default Client configuration.

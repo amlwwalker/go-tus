@@ -1,11 +1,14 @@
 package tus
 
 import (
+	"bytes"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"net/http"
 	netUrl "net/url"
 	"strconv"
+	"time"
 )
 
 const (
@@ -39,10 +42,14 @@ func NewClient(url string, config *Config) (*Client, error) {
 
 	var c *http.Client
 
+	//WARN: Alex Walker added a default and customisable timeout here
 	if config.Transport == nil {
-		c = &http.Client{}
+		c = &http.Client{
+			Timeout: time.Second * 20, //20 seconds
+		}
 	} else {
 		c = &http.Client{
+			Timeout:   config.Timeout,
 			Transport: config.Transport,
 		}
 	}
@@ -63,8 +70,29 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	}
 
 	req.Header.Set("Tus-Resumable", ProtocolVersion)
-
 	return c.client.Do(req)
+}
+
+// CreateUpload creates a new upload in the server.
+func (c *Client) CreateUploadWithBody(u *Upload, body *[]byte) (*Uploader, error) {
+	if u == nil {
+		return nil, ErrNilUpload
+	}
+
+	if c.Config.Resume && len(u.Fingerprint) == 0 {
+		return nil, ErrFingerprintNotSet
+	}
+
+	req, err := http.NewRequest("POST", c.Url, bytes.NewReader(*body))
+
+	if err != nil {
+		return nil, err
+	}
+	fmt.Printf("body: %+v\r\n", string(*body))
+	bodyLength := strconv.Itoa(len(*body))
+	req.Header.Set("Content-Length", bodyLength)
+	fmt.Printf("about to make the post request, setting length to %s\r\n", bodyLength)
+	return c.makePostRequest(req, u)
 }
 
 // CreateUpload creates a new upload in the server.
@@ -82,11 +110,16 @@ func (c *Client) CreateUpload(u *Upload) (*Uploader, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	req.Header.Set("Content-Length", "0")
+	return c.makePostRequest(req, u)
+}
+
+func (c *Client) makePostRequest(req *http.Request, u *Upload) (*Uploader, error) {
+
 	req.Header.Set("Upload-Length", strconv.FormatInt(u.size, 10))
 	req.Header.Set("Upload-Metadata", u.EncodedMetadata())
 
+	// fmt.Printf("Request %+v\r\n", req)
 	res, err := c.Do(req)
 
 	if err != nil {
@@ -94,6 +127,7 @@ func (c *Client) CreateUpload(u *Upload) (*Uploader, error) {
 	}
 	defer res.Body.Close()
 
+	// fmt.Printf("status code: %d\r\n", res.StatusCode)
 	switch res.StatusCode {
 	case 201:
 		url := res.Header.Get("Location")
@@ -172,12 +206,13 @@ func (c *Client) CreateOrResumeUpload(u *Upload) (*Uploader, error) {
 
 func (c *Client) uploadChunck(url string, body io.Reader, size int64, offset int64) (int64, error) {
 	var method string
-
+	// fmt.Println("uploading chunk to ", url)
 	if !c.Config.OverridePatchMethod {
 		method = "PATCH"
 	} else {
 		method = "POST"
 	}
+	// fmt.Println("uploading with method ", method)
 
 	req, err := http.NewRequest(method, url, body)
 
@@ -193,13 +228,15 @@ func (c *Client) uploadChunck(url string, body io.Reader, size int64, offset int
 		req.Header.Set("X-HTTP-Method-Override", "PATCH")
 	}
 
+	fmt.Println("uploading about to occur")
 	res, err := c.Do(req)
 
 	if err != nil {
+		fmt.Println("error requesting ", err)
 		return -1, err
 	}
 	defer res.Body.Close()
-
+	fmt.Println("res.StatusCode ", res.StatusCode)
 	switch res.StatusCode {
 	case 204:
 		if newOffset, err := strconv.ParseInt(res.Header.Get("Upload-Offset"), 10, 64); err == nil {
